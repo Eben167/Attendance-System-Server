@@ -20,6 +20,23 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+// Function to pause execution for a given time (in ms)
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Function to send emails in batches
+const sendEmailsInBatches = async (emailPromises, batchSize = 10, delayMs = 10000) => {
+    for (let i = 0; i < emailPromises.length; i += batchSize) {
+        const batch = emailPromises.slice(i, i + batchSize);
+        try {
+            await Promise.all(batch); // Send the batch of emails in parallel
+            console.log(`Batch ${Math.floor(i / batchSize) + 1} sent successfully.`);
+            await sleep(delayMs); // Delay between batches (to avoid overloading the server)
+        } catch (error) {
+            console.error(`Error sending batch ${Math.floor(i / batchSize) + 1}:`, error);
+        }
+    }
+};
+
 // Endpoint to handle sign-in notifications
 app.post('/sign-in', (req, res) => {
     console.log('Received sign-in notification');
@@ -74,19 +91,22 @@ app.post('/sign-out', (req, res) => {
     });
 });
 
-// Endpoint to handle reset notifications (for absent students)
+// Endpoint to handle attendance reset notifications (for absent students)
 app.post('/attendance-reset', (req, res) => {
     console.log('Received request to reset attendance');
-    const students = req.body.students; // Expecting an array of all students
-    const signedInStudents = req.body.signedInStudents; // List of students who signed in before reset
+    const students = req.body.students; // List of all students
+    const signedInStudents = req.body.signedInStudents; // List of signed-in students
 
     if (!Array.isArray(students) || students.length === 0 || !Array.isArray(signedInStudents)) {
         return res.status(400).json({ error: 'Invalid student list.' });
     }
 
-    const absentStudents = students.filter(student => !signedInStudents.some(signedIn => signedIn.id === student.id));
+    // Filter absent students
+    const absentStudents = students.filter(student => 
+        !signedInStudents.some(signedIn => signedIn.id === student.id)
+    );
 
-    // Create an array of promises for sending emails
+    // Create a list of email promises for absent students
     const emailPromises = absentStudents.map(student => {
         const mailOptions = {
             from: process.env.EMAIL_USER,
@@ -95,22 +115,20 @@ app.post('/attendance-reset', (req, res) => {
             text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please ensure to sign in for future sessions.\n\nBest regards,\nAttendance System`
         };
 
-        // Return a Promise that resolves when the email is sent
         return new Promise((resolve, reject) => {
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
-                    reject(`Failed to send email to ${student.email}: ${error}`); // Reject if email fails
+                    reject(`Failed to send email to ${student.email}: ${error}`);
                 } else {
-                    resolve(`Email sent to ${student.email}: ${info.response}`); // Resolve if email is sent
+                    resolve(`Email sent to ${student.email}: ${info.response}`);
                 }
             });
         });
     });
 
-    // Use Promise.all to send all emails concurrently
-    Promise.all(emailPromises)
-        .then(results => {
-            console.log('All emails sent successfully:', results);
+    // Send the emails in batches
+    sendEmailsInBatches(emailPromises)
+        .then(() => {
             res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
         })
         .catch(error => {
