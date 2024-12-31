@@ -20,24 +20,79 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Endpoint to receive absent students list
-app.post('/absent-students', (req, res) => {
-    console.log('Received request to /absent-students');
-    const absentStudents = req.body; // Expecting an array of student objects
-    console.log('Received absent students:', absentStudents);
+// Endpoint to handle sign-in notifications
+app.post('/sign-in', (req, res) => {
+    console.log('Received sign-in notification');
+    const student = req.body; // Expecting a student object with {id, name, email}
+    
+    // Validate data
+    if (!student.name || !student.email) {
+        return res.status(400).json({ error: 'Invalid student data.' });
+    }
+
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: student.email,
+        subject: 'Attendance Notification: Signed In',
+        text: `Dear ${student.name},\n\nYou have successfully signed in for the attendance session.\n\nBest regards,\nAttendance System`
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+            console.error(`Failed to send email to ${student.email}:`, error);
+            return res.status(500).json({ error: 'Failed to send sign-in email.' });
+        }
+        console.log(`Sign-in email sent to ${student.email}:`, info.response);
+        res.status(200).json({ message: 'Sign-in notification sent successfully.' });
+    });
+});
+
+// Endpoint to handle sign-out notifications
+app.post('/sign-out', (req, res) => {
+    console.log('Received sign-out notification');
+    const student = req.body; // Expecting a student object with {id, name, email}
 
     // Validate data
-    if (!Array.isArray(absentStudents) || absentStudents.length === 0) {
-        return res.status(400).json({ error: 'Invalid or empty student list.' });
+    if (!student.name || !student.email) {
+        return res.status(400).json({ error: 'Invalid student data.' });
     }
+
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: student.email,
+        subject: 'Attendance Notification: Signed Out',
+        text: `Dear ${student.name},\n\nYou have successfully signed out for the attendance session.\n\nBest regards,\nAttendance System`
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+            console.error(`Failed to send email to ${student.email}:`, error);
+            return res.status(500).json({ error: 'Failed to send sign-out email.' });
+        }
+        console.log(`Sign-out email sent to ${student.email}:`, info.response);
+        res.status(200).json({ message: 'Sign-out notification sent successfully.' });
+    });
+});
+
+// Endpoint to handle reset notifications (for absent students)
+app.post('/attendance-reset', (req, res) => {
+    console.log('Received request to reset attendance');
+    const students = req.body.students; // Expecting an array of all students
+    const signedInStudents = req.body.signedInStudents; // List of students who signed in before reset
+
+    if (!Array.isArray(students) || students.length === 0 || !Array.isArray(signedInStudents)) {
+        return res.status(400).json({ error: 'Invalid student list.' });
+    }
+
+    const absentStudents = students.filter(student => !signedInStudents.some(signedIn => signedIn.id === student.id));
 
     // Send emails to absent students
     absentStudents.forEach(student => {
         const mailOptions = {
             from: process.env.EMAIL_USER,
             to: student.email,
-            subject: 'Attendance Notification',
-            text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please provide a valid reason for your absence.\n\nBest regards,\nAttendance System`
+            subject: 'Attendance Notification: Missed Session',
+            text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please ensure to sign in for future sessions.\n\nBest regards,\nAttendance System`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
@@ -49,9 +104,8 @@ app.post('/absent-students', (req, res) => {
         });
     });
 
-    res.status(200).json({ message: 'Emails sent to absent students successfully.' });
+    res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
 });
-
 
 // Start the server
 app.listen(PORT, () => {
