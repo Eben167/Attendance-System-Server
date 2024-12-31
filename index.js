@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 dotenv.config(); // Load environment variables from .env file
 
 const app = express();
-const PORT = process.env.PORT || 3000; // Use the Render-assigned port or default to 3000
+const PORT = process.env.PORT || 10000; // Use the port assigned by Render if available
 
 // Middleware to parse incoming JSON data
 app.use(bodyParser.json());
