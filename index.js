@@ -20,22 +20,28 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Function to pause execution for a given time (in ms)
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Function to send an email
+const sendEmail = (student) => {
+    return new Promise((resolve, reject) => {
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: student.email,
+            subject: 'Attendance Notification: Missed Session',
+            text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please ensure to sign in for future sessions.\n\nBest regards,\nAttendance System`
+        };
 
-// Function to send emails in batches
-const sendEmailsInBatches = async (emailPromises, batchSize = 10, delayMs = 10000) => {
-    for (let i = 0; i < emailPromises.length; i += batchSize) {
-        const batch = emailPromises.slice(i, i + batchSize);
-        try {
-            await Promise.all(batch); // Send the batch of emails in parallel
-            console.log(`Batch ${Math.floor(i / batchSize) + 1} sent successfully.`);
-            await sleep(delayMs); // Delay between batches (to avoid overloading the server)
-        } catch (error) {
-            console.error(`Error sending batch ${Math.floor(i / batchSize) + 1}:`, error);
-        }
-    }
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error(`Failed to send email to ${student.email}:`, error);
+                reject(`Error sending email to ${student.email}`);
+            } else {
+                console.log(`Email sent to ${student.email}:`, info.response);
+                resolve(`Email sent to ${student.email}`);
+            }
+        });
+    });
 };
+
 
 // Endpoint to handle sign-in notifications
 app.post('/sign-in', (req, res) => {
@@ -91,50 +97,27 @@ app.post('/sign-out', (req, res) => {
     });
 });
 
-// Endpoint to handle attendance reset notifications (for absent students)
-app.post('/attendance-reset', (req, res) => {
+// Endpoint to handle attendance reset and send emails to absent students
+app.post('/attendance-reset', async (req, res) => {
     console.log('Received request to reset attendance');
-    const students = req.body.students; // List of all students
-    const signedInStudents = req.body.signedInStudents; // List of signed-in students
+    const students = req.body.students; // Expecting an array of all students
+    const signedInStudents = req.body.signedInStudents; // List of students who signed in before reset
 
     if (!Array.isArray(students) || students.length === 0 || !Array.isArray(signedInStudents)) {
         return res.status(400).json({ error: 'Invalid student list.' });
     }
 
-    // Filter absent students
-    const absentStudents = students.filter(student => 
-        !signedInStudents.some(signedIn => signedIn.id === student.id)
-    );
+    const absentStudents = students.filter(student => !signedInStudents.some(signedIn => signedIn.id === student.id));
 
-    // Create a list of email promises for absent students
-    const emailPromises = absentStudents.map(student => {
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: student.email,
-            subject: 'Attendance Notification: Missed Session',
-            text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please ensure to sign in for future sessions.\n\nBest regards,\nAttendance System`
-        };
-
-        return new Promise((resolve, reject) => {
-            transporter.sendMail(mailOptions, (error, info) => {
-                if (error) {
-                    reject(`Failed to send email to ${student.email}: ${error}`);
-                } else {
-                    resolve(`Email sent to ${student.email}: ${info.response}`);
-                }
-            });
-        });
-    });
-
-    // Send the emails in batches
-    sendEmailsInBatches(emailPromises)
-        .then(() => {
-            res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
-        })
-        .catch(error => {
-            console.error('Error sending emails:', error);
-            res.status(500).json({ error: 'Failed to send some or all emails.' });
-        });
+    // Send emails to absent students one at a time
+    try {
+        for (let student of absentStudents) {
+            await sendEmail(student); // Wait for the email to be sent before continuing
+        }
+        res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error sending email notifications.' });
+    }
 });
 
 // Start the server
