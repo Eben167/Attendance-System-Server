@@ -86,8 +86,8 @@ app.post('/attendance-reset', (req, res) => {
 
     const absentStudents = students.filter(student => !signedInStudents.some(signedIn => signedIn.id === student.id));
 
-    // Send emails to absent students
-    absentStudents.forEach(student => {
+    // Create an array of promises for sending emails
+    const emailPromises = absentStudents.map(student => {
         const mailOptions = {
             from: process.env.EMAIL_USER,
             to: student.email,
@@ -95,16 +95,28 @@ app.post('/attendance-reset', (req, res) => {
             text: `Dear ${student.name},\n\nYou were marked absent during the last attendance session. Please ensure to sign in for future sessions.\n\nBest regards,\nAttendance System`
         };
 
-        transporter.sendMail(mailOptions, (error, info) => {
-            if (error) {
-                console.error(`Failed to send email to ${student.email}:`, error);
-            } else {
-                console.log(`Email sent to ${student.email}:`, info.response);
-            }
+        // Return a Promise that resolves when the email is sent
+        return new Promise((resolve, reject) => {
+            transporter.sendMail(mailOptions, (error, info) => {
+                if (error) {
+                    reject(`Failed to send email to ${student.email}: ${error}`); // Reject if email fails
+                } else {
+                    resolve(`Email sent to ${student.email}: ${info.response}`); // Resolve if email is sent
+                }
+            });
         });
     });
 
-    res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
+    // Use Promise.all to send all emails concurrently
+    Promise.all(emailPromises)
+        .then(results => {
+            console.log('All emails sent successfully:', results);
+            res.status(200).json({ message: 'Attendance reset notification sent to absent students.' });
+        })
+        .catch(error => {
+            console.error('Error sending emails:', error);
+            res.status(500).json({ error: 'Failed to send some or all emails.' });
+        });
 });
 
 // Start the server
